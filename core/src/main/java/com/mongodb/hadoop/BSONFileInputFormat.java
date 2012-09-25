@@ -26,6 +26,11 @@ import java.io.IOException;
 
 public class BSONFileInputFormat extends FileInputFormat {
 
+    protected boolean isSplitable(org.apache.hadoop.mapreduce.JobContext context, org.apache.hadoop.fs.Path filename) {
+        return false;
+    }
+
+
     @Override
     public RecordReader createRecordReader(InputSplit split, TaskAttemptContext context) throws IOException, InterruptedException {
         BSONFileRecordReader reader = new BSONFileRecordReader();

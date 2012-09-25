@@ -22,9 +22,22 @@ import java.util.*;
 import java.util.concurrent.atomic.*;
 
 public class BSONLoader implements Iterable<BSONObject>, Iterator<BSONObject> {
-    
+
+    LazyDBDecoder lazyDecoder = new LazyDBDecoder();
+    boolean hasNext = true;
+    private final InputStream inputStream;
+    private static final Log log = LogFactory.getLog( BSONLoader.class );
+    private AtomicBoolean hasMore = new AtomicBoolean( true );
+    LazyDBObject currentDBObj = null;
+
     public BSONLoader(final InputStream input) {
-        _input = new DataInputStream( input );
+        inputStream = input;
+        try {
+            currentDBObj = (LazyDBObject)lazyDecoder.decode( inputStream, (DBCollection) null );
+        } catch (Exception exp) {
+            log.debug( "Error reading record, may be EOF",exp );
+            hasMore.set( false );
+        }
     }
 
     public Iterator<BSONObject> iterator(){
@@ -32,58 +45,31 @@ public class BSONLoader implements Iterable<BSONObject>, Iterator<BSONObject> {
     }
 
     public boolean hasNext(){
-        checkHeader();
-        return hasMore.get();
-    }
-    
-    private synchronized void checkHeader(){
-        // Read the BSON length from the start of the record
-        byte[] l = new byte[4];
-        try {
-            _input.readFully( l );
-            nextLen = org.bson.io.Bits.readInt( l );
-            nextHdr = l;
-            hasMore.set( true );
-        } catch (Exception e) {
-            log.debug( "Failed to get next header: " + e, e );
-            hasMore.set( false );
-            try {
-                _input.close();
-            }
-            catch ( IOException e1 ) { }
-        }
+         return hasMore.get();
     }
 
-    public BSONObject next(){
+
+    public synchronized BSONObject next(){
         try {
-            byte[] data = new byte[nextLen + 4];
-            System.arraycopy( nextHdr, 0, data, 0, 4 );
-            _input.readFully( data, 4, nextLen - 4 );
-            decoder.decode( data, callback );
-            return (BSONObject) callback.get();
-        }
-        catch ( IOException e ) {
+            LazyDBObject nextDBObj = (LazyDBObject)lazyDecoder.decode( inputStream, (DBCollection) null );
+            LazyDBObject tempDBObj = currentDBObj;
+            currentDBObj = nextDBObj;
+            return (BSONObject) tempDBObj;
+        } catch ( Exception e ) {
             /* If we can't read another length it's not an error, just return quietly. */
-            log.info( "No Length Header available." + e );
+            log.debug( "Error reading record, may be EOF",e );
             hasMore.set( false );
             try {
-                _input.close();
+                inputStream.close();
+            } catch ( IOException e1 ) {
+                log.debug( "Error closing input stream",e1 );
             }
-            catch ( IOException e1 ) { }
-            throw new NoSuchElementException("Iteration completed.");
         }
+        return currentDBObj;
     }
 
     public void remove(){
         throw new UnsupportedOperationException();
     }
 
-    private final BSONDecoder decoder = new BasicBSONDecoder();
-    private final BSONCallback callback = new BasicBSONCallback();
-
-    private volatile byte[] nextHdr;
-    private volatile int nextLen;
-    private AtomicBoolean hasMore = new AtomicBoolean( true );
-    private final DataInputStream _input;
-    private static final Log log = LogFactory.getLog( BSONLoader.class );
 }
